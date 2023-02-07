@@ -5,6 +5,8 @@ import threading
 import copy
 import re
 
+from utils import CPrint
+
 
 def fill_zero(origin):
     return "0" if origin == "" else origin
@@ -77,6 +79,7 @@ class GNSSClient(object):
     BAUDRATE = 38400
 
     def __init__(self):
+        self._status = False
         self._connect_serial_port()
         self._serial_lock = threading.Lock()
         self._stop_update_thread = False
@@ -92,6 +95,8 @@ class GNSSClient(object):
             "TXT": self._TXT,
             "ZDA": self._ZDA
         }
+        if not self._status:
+            return
         self._sync_thread = threading.Thread(target=self._sync_gnss_info)
         self._sync_thread.start()
 
@@ -106,8 +111,9 @@ class GNSSClient(object):
             self._serial_device = serial.Serial(
                 self._device_port, GNSSClient.BAUDRATE)
             assert self._serial_device.isOpen()
+            self._status = True
         except Exception as e:
-            print("[error] cannot connect serial device \"{device}\"".format(
+            CPrint.print("[error] cannot connect serial device \"{device}\"".format(
                 device=self._device_port), e)
 
     def stop_sync_gnss(self):
@@ -125,7 +131,7 @@ class GNSSClient(object):
         return resp
 
     def _sync_gnss_info(self):
-        print("[info] start sync gnss info")
+        CPrint.print("[info] start sync gnss info")
         self._stop_update_thread = False
         while True:
             self._serial_lock.acquire()
@@ -140,26 +146,29 @@ class GNSSClient(object):
                     cmd = line.split(",")[0][-3:]
                     cmd_line = GNSSClient.CMD_PATTERN.findall(line)
                     if len(cmd_line) != 1:
-                        print("[warning] can not recognize cmd \"{line}\"".format(
+                        CPrint.print("[warning] can not recognize cmd \"{line}\"".format(
                             line=line
                         ))
                         continue
                     if cmd not in self.CMD_MAP:
-                        print("[warning] no matched cmd {cmd}".format(cmd=cmd))
+                        CPrint.print(
+                            "[warning] no matched cmd {cmd}".format(cmd=cmd))
                         continue
                     self.CMD_MAP[cmd](cmd_line[0])
                 except Exception as e:
-                    print("[error] parse nmea info error: {e}".format(e=e))
+                    CPrint.print(
+                        "[error] parse nmea info error: {e}".format(e=e))
 
             self._serial_lock.release()
-        print("[info] stop sync gnss info")
+        CPrint.print("[info] stop sync gnss info")
 
     def _GSV(self, cmd):
         cmd_l = cmd.split(",")
         sys = cmd_l[0][:2]
         cmd_l = cmd_l[4:]
         if len(cmd_l) % 4:
-            print("[error] invalid GSV data \"{data}\"".format(data=cmd))
+            CPrint.print(
+                "[error] invalid GSV data \"{data}\"".format(data=cmd))
             return
         for i in range(len(cmd_l) // 4):
             svid = cmd_l[i*4+0]
@@ -206,8 +215,8 @@ if __name__ == "__main__":
     gnss_client = GNSSClient()
 
     for i in range(10):
-        print(time.time())
-        print(gnss_client.get_current_data())
+        CPrint.print(time.time())
+        CPrint.print(gnss_client.get_current_data())
         time.sleep(1)
 
     gnss_client.stop_sync_gnss()
