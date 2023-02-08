@@ -44,14 +44,16 @@ class GGAInfo(object):
         self._u_lat = cmd_l[3]
         self._lng = None
         self._u_lng = cmd_l[5]
+        self._msl = None
         if len(cmd_l[2]) != 0:
             self._lat = float(cmd_l[2]) / 100
         if len(cmd_l[4]) != 0:
             self._lng = float(cmd_l[4]) / 100
+        if len(cmd_l[9]) != 0:
+            self._msl = float(cmd_l[9])
         self._status = int(cmd_l[6])
         self._num_sv = cmd_l[7]
         self._hdop = cmd_l[8]
-        self._msl = cmd_l[9]
 
     def __repr__(self):
         resp = "[GGA] {valid}".format(
@@ -84,10 +86,10 @@ class GNSSClient(object):
         self._serial_lock = threading.Lock()
         self._stop_update_thread = False
         self._sat = dict()
-        self._last_gaa = None
+        self._last_gga = None
         self.CMD_MAP = {
             "GSV": self._GSV,
-            "GGA": self._GAA,
+            "GGA": self._GGA,
             "GSA": self._GSA,
             "RMC": self._RMC,
             "VTG": self._VTG,
@@ -113,19 +115,20 @@ class GNSSClient(object):
             assert self._serial_device.isOpen()
             self._status = True
         except Exception as e:
-            CPrint.print("[error] cannot connect serial device \"{device}\"".format(
-                device=self._device_port), e)
+            CPrint.print("[error] cannot connect serial device \"{device}\", {e}".format(
+                device=self._device_port, e=e))
 
     def stop_sync_gnss(self):
         self._serial_lock.acquire()
         self._stop_update_thread = True
+        self._serial_device.close()
         self._serial_lock.release()
 
     def get_current_data(self):
         self._serial_lock.acquire()
         resp = {
             "sat": copy.deepcopy(self._sat),
-            "gaa": copy.deepcopy(self._last_gaa)
+            "gga": copy.deepcopy(self._last_gga)
         }
         self._serial_lock.release()
         return resp
@@ -139,25 +142,32 @@ class GNSSClient(object):
                 self._serial_lock.release()
                 break
 
-            while self._serial_device.inWaiting() > 20:
-                line = self._serial_device.readline()
-                try:
-                    line = line.decode('utf-8').strip()
-                    cmd = line.split(",")[0][-3:]
-                    cmd_line = GNSSClient.CMD_PATTERN.findall(line)
-                    if len(cmd_line) != 1:
-                        CPrint.print("[warning] can not recognize cmd \"{line}\"".format(
-                            line=line
-                        ))
-                        continue
-                    if cmd not in self.CMD_MAP:
+            try:
+                while self._serial_device.inWaiting() > 20:
+                    line = self._serial_device.readline()
+                    try:
+                        line = line.decode('utf-8').strip()
+                        cmd = line.split(",")[0][-3:]
+                        cmd_line = GNSSClient.CMD_PATTERN.findall(line)
+                        if len(cmd_line) != 1:
+                            CPrint.print("[warning] can not recognize cmd \"{line}\"".format(
+                                line=line
+                            ))
+                            continue
+                        if cmd not in self.CMD_MAP:
+                            CPrint.print(
+                                "[warning] no matched cmd {cmd}".format(cmd=cmd))
+                            continue
+                        self.CMD_MAP[cmd](cmd_line[0])
+                    except Exception as e:
                         CPrint.print(
-                            "[warning] no matched cmd {cmd}".format(cmd=cmd))
-                        continue
-                    self.CMD_MAP[cmd](cmd_line[0])
-                except Exception as e:
-                    CPrint.print(
-                        "[error] parse nmea info error: {e}".format(e=e))
+                            "[error] parse nmea info error: {e}".format(e=e))
+            except Exception as e:
+                CPrint.print(
+                    "[error] serial connect error: {e}".format(e=e))
+                self._status = False
+                self._serial_lock.release()
+                break
 
             self._serial_lock.release()
         CPrint.print("[info] stop sync gnss info")
@@ -181,8 +191,8 @@ class GNSSClient(object):
                 new_sat._is_use = self._sat[new_sat.key()]._is_use
             self._sat[new_sat.key()] = new_sat
 
-    def _GAA(self, cmd):
-        self._last_gaa = GGAInfo(cmd)
+    def _GGA(self, cmd):
+        self._last_gga = GGAInfo(cmd)
 
     def _GSA(self, cmd):
         cmd_l = cmd.split(",")

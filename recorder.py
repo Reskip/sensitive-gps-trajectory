@@ -1,7 +1,12 @@
 import os
+import gc
 import math
 import tkinter as tk
-from PIL import Image
+from PIL import Image, ImageTk
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+# https://blog.csdn.net/qq_44817900/article/details/124302515
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import customtkinter
 
 from gnss_client import GNSSClient
@@ -39,11 +44,12 @@ class SatLocate(object):
                 img_key = sat_info._sys + ("" if sat_info._is_use else "_NU")
                 self.root.create_image(
                     x, y, image=self.bg_img[img_key], anchor=tk.NW, tags=("sat"))
-        if "gaa" in gnss_data and gnss_data["gaa"] is not None:
-            gaa_info = gnss_data["gaa"]
-            if gaa_info._status == 1:
-                hdop = gaa_info._hdop + "m"
-                stime = gaa_info._time
+        if "gga" in gnss_data and gnss_data["gga"] is not None:
+            gga_info = gnss_data["gga"]
+            if gga_info._status == 1:
+                hdop = gga_info._hdop + \
+                    ("" if len(gga_info._hdop) > 3 else "m")
+                stime = gga_info._time
                 h = stime[:2]
                 m = stime[2:4]
                 s = stime[4:6]
@@ -59,7 +65,21 @@ class SatLocate(object):
 class Recorder(customtkinter.CTk):
     def __init__(self):
         super().__init__()
+        self.active = False
         self.trail = None
+        self.last_trail_img = None
+        self.trail_cache_image = None
+        self.now_at = "home"
+        self.trail_mode = True
+
+        self.figure_2d = Figure(figsize=(2.8, 3), dpi=100, facecolor="#242424")
+        self.subplot_2d = self.figure_2d.add_subplot(1, 1, 1)
+        self.subplot_2d.axis('off')
+
+        self.figure_3d = Figure(figsize=(2.8, 3), dpi=100, facecolor="#242424")
+        self.subplot_3d = self.figure_3d.add_subplot(1, 1, 1, projection='3d')
+        self.subplot_3d.axis('on')
+
         self.title("Recorder")
         self.geometry("320x240")
 
@@ -152,9 +172,28 @@ class Recorder(customtkinter.CTk):
         self.canvas.tag_bind('log_trail', '<Button-1>', self.log_trail)
         self.canvas.place(x=-4, y=-2)
 
-        # create second frame
+        # create trail frame
         self.trail_frame = customtkinter.CTkFrame(
             self, corner_radius=0, fg_color="transparent")
+        self.trail_canvas = tk.Canvas(
+            self.trail_frame, height=240, width=230, bg="#242424")
+
+        self.canvas_tk_agg_2d = FigureCanvasTkAgg(
+            self.figure_2d, master=self.trail_canvas)
+        self.canvas_widget_2d = self.canvas_tk_agg_2d.get_tk_widget()
+        self.canvas_widget_2d.tag_bind('trail_mode', '<Button-1>',
+                                       self.update_trail_mode)
+
+        self.canvas_tk_agg_3d = FigureCanvasTkAgg(
+            self.figure_3d, master=self.trail_canvas)
+        self.canvas_widget_3d = self.canvas_tk_agg_3d.get_tk_widget()
+        self.canvas_widget_3d.tag_bind('trail_mode', '<Button-1>',
+                                       self.update_trail_mode)
+        self.canvas_widget_now = self.canvas_widget_2d
+        self.canvas_widget_now.place(x=-32, y=-32)
+
+        self.update_trail_mode(None)
+        self.trail_canvas.place(x=0, y=0)
 
         # create info frame
         self.info_frame = customtkinter.CTkFrame(
@@ -170,6 +209,8 @@ class Recorder(customtkinter.CTk):
             self.canvas, self.sat_image)
         self.gnss_client = GNSSClient()
         self.select_frame_by_name("home")
+        self.clear_temp_file()
+        self.active = True
         self.auto_update()
 
     def select_frame_by_name(self, name):
@@ -180,6 +221,8 @@ class Recorder(customtkinter.CTk):
             fg_color=("gray75", "gray25") if name == "trail" else "transparent")
         self.info_button.configure(
             fg_color=("gray75", "gray25") if name == "info" else "transparent")
+
+        self.now_at = name
 
         # show selected frame
         if name == "home":
@@ -202,7 +245,7 @@ class Recorder(customtkinter.CTk):
                 15, 14, image=self.edit_active_image, anchor=tk.NW, tags=("log_trail"))
             self.trail = Trail()
         else:
-            self.trail.save("data")
+            self.trail.save()
             self.trail = None
             self.log_icon = self.canvas.create_image(
                 15, 14, image=self.edit_image, anchor=tk.NW, tags=("log_trail"))
@@ -212,7 +255,109 @@ class Recorder(customtkinter.CTk):
         self.sat_locate_updater.update_pic(gnss_data)
         if self.trail:
             self.trail.update(gnss_data)
+            self.update_trail_pic()
         self.after(500, self.auto_update)
+
+    def update_trail_mode(self, event):
+        if event is not None:
+            self.trail_mode = not self.trail_mode
+            if not self.trail_mode:
+                self.canvas_widget_2d.place_forget()
+                self.canvas_widget_3d.place(x=-32, y=-32)
+                self.canvas_widget_now = self.canvas_widget_3d
+            else:
+                self.canvas_widget_3d.place_forget()
+                self.canvas_widget_2d.place(x=-32, y=-32)
+                self.canvas_widget_now = self.canvas_widget_2d
+
+        self.canvas_widget_now.delete("trail_mode")
+        text = "2D" if self.trail_mode else "3D"
+        self.canvas_widget_now.create_image(
+            34, 37, image=self.main_status_side_image, anchor=tk.NW, tags=("trail_mode"))
+        self.canvas_widget_now.create_text(
+            45, 44, text=text, fill='#878787', font=("Arial", 10, "bold"), anchor=tk.NW, tags=("trail_mode", "text"))
+
+    def update_trail_pic_2d(self):
+        self.subplot_2d.clear()
+        self.subplot_2d.axis('off')
+        line_x = list()
+        line_y = list()
+        for p in self.trail._points:
+            line_x.append(p._lat)
+            line_y.append(p._lng)
+
+        eps = 0.000001
+        if self.trail._lat_lim:
+            lat_lim_dif = self.trail._lat_lim[1] - self.trail._lat_lim[0]
+            lng_lim_dif = self.trail._lng_lim[1] - self.trail._lng_lim[0]
+            max_lim = max(lat_lim_dif, lng_lim_dif) + eps
+            lat_lim_dif = (max_lim - lat_lim_dif) / 2 + max_lim * 0.1
+            lng_lim_dif = (max_lim - lng_lim_dif) / 2 + max_lim * 0.1
+            self.subplot_2d.set_xlim(self.trail._lat_lim[0] -
+                                     lat_lim_dif, self.trail._lat_lim[1] + lat_lim_dif)
+            self.subplot_2d.set_ylim(self.trail._lng_lim[0] -
+                                     lng_lim_dif, self.trail._lng_lim[1] + lng_lim_dif)
+
+        self.subplot_2d.plot(line_x, line_y, alpha=0.8, color="#6495ED")
+        if len(line_x):
+            self.subplot_2d.scatter([line_x[-1]], [line_y[-1]],
+                                    alpha=0.8, color="#6495ED")
+        self.canvas_tk_agg_2d.draw()
+
+    def update_trail_pic_3d(self):
+        self.subplot_3d.clear()
+        self.subplot_3d.axis('on')
+        self.subplot_3d.patch.set_facecolor('#242424')
+        self.subplot_3d.w_xaxis.set_pane_color((0.0, 0.0, 0.0, 0.0))
+        self.subplot_3d.w_yaxis.set_pane_color((0.0, 0.0, 0.0, 0.0))
+        self.subplot_3d.w_zaxis.set_pane_color((0.0, 0.0, 0.0, 0.0))
+        line_config = {"linewidth": 1.2, "color": "#777777"}
+        self.subplot_3d.xaxis._axinfo["grid"].update(line_config)
+        self.subplot_3d.yaxis._axinfo["grid"].update(line_config)
+        self.subplot_3d.zaxis._axinfo["grid"].update(line_config)
+        self.subplot_3d.w_xaxis.set_ticklabels([])
+        self.subplot_3d.w_yaxis.set_ticklabels([])
+        self.subplot_3d.w_zaxis.set_ticklabels([])
+        plt.rcParams['figure.dpi'] = 100
+        line_x = list()
+        line_y = list()
+        line_z = list()
+        for p in self.trail._points:
+            line_x.append(p._lat)
+            line_y.append(p._lng)
+            line_z.append(p._msl)
+
+        eps = 0.000001
+        if self.trail._lat_lim:
+            lat_lim_dif = self.trail._lat_lim[1] - self.trail._lat_lim[0]
+            lng_lim_dif = self.trail._lng_lim[1] - self.trail._lng_lim[0]
+            max_lim = max(lat_lim_dif, lng_lim_dif) + eps
+            lat_lim_dif = (max_lim - lat_lim_dif) / 2
+            lng_lim_dif = (max_lim - lng_lim_dif) / 2
+            self.subplot_3d.set_xlim(self.trail._lat_lim[0] -
+                                     lat_lim_dif, self.trail._lat_lim[1] + lat_lim_dif)
+            self.subplot_3d.set_ylim(self.trail._lng_lim[0] -
+                                     lng_lim_dif, self.trail._lng_lim[1] + lng_lim_dif)
+
+        self.subplot_3d.plot(line_x, line_y, line_z,
+                             alpha=0.8, color="#6495ED")
+        if len(line_x):
+            self.subplot_3d.scatter([line_x[-1]], [line_y[-1]],
+                                    [line_z[-1]], alpha=0.8, color="#6495ED")
+        self.canvas_tk_agg_3d.draw()
+
+    def update_trail_pic(self):
+        self.update_trail_pic_2d()
+        self.update_trail_pic_3d()
+        self.update_trail_mode(None)
+
+    def clear_temp_file(self):
+        for root, dirs, files in os.walk("."):
+            for file in files:
+                path = os.path.join(root, file)
+                if file[0] == "_":
+                    CPrint.print("[info] remove temp file {f}".format(f=path))
+                    os.remove(path)
 
     def home_button_event(self):
         self.select_frame_by_name("home")
@@ -224,11 +369,13 @@ class Recorder(customtkinter.CTk):
         self.select_frame_by_name("info")
 
     def exit_button_event(self):
+        self.active = False
         CPrint.set_text_box(None)
         self.gnss_client.stop_sync_gnss()
         if self.trail:
-            self.trail.save("data")
-        exit(0)
+            self.trail.save()
+        self.quit()
+        self.destroy()
 
 
 if __name__ == "__main__":
