@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 # https://blog.csdn.net/qq_44817900/article/details/124302515
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import customtkinter
+import threading
 
 from gnss_client import GNSSClient
 from trail import Trail
@@ -286,7 +287,7 @@ class Recorder(customtkinter.CTk):
             line_x.append(p._lat)
             line_y.append(p._lng)
 
-        eps = 0.000001
+        eps = 0.001
         if self.trail._lat_lim:
             lat_lim_dif = self.trail._lat_lim[1] - self.trail._lat_lim[0]
             lng_lim_dif = self.trail._lng_lim[1] - self.trail._lng_lim[0]
@@ -327,7 +328,7 @@ class Recorder(customtkinter.CTk):
             line_y.append(p._lng)
             line_z.append(p._msl)
 
-        eps = 0.000001
+        eps = 0.001
         if self.trail._lat_lim:
             lat_lim_dif = self.trail._lat_lim[1] - self.trail._lat_lim[0]
             lng_lim_dif = self.trail._lng_lim[1] - self.trail._lng_lim[0]
@@ -338,6 +339,8 @@ class Recorder(customtkinter.CTk):
                                      lat_lim_dif, self.trail._lat_lim[1] + lat_lim_dif)
             self.subplot_3d.set_ylim(self.trail._lng_lim[0] -
                                      lng_lim_dif, self.trail._lng_lim[1] + lng_lim_dif)
+            self.subplot_3d.set_zlim(self.trail._msl_lim[0] -
+                                     50, self.trail._msl_lim[1] + 50)
 
         self.subplot_3d.plot(line_x, line_y, line_z,
                              alpha=0.8, color="#6495ED")
@@ -380,5 +383,5 @@ class Recorder(customtkinter.CTk):
 
 if __name__ == "__main__":
     recorder = Recorder()
-    recorder.overrideredirect(True)
+    recorder.overrideredirect(False)
     recorder.mainloop()

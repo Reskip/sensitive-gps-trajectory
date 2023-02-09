@@ -38,6 +38,7 @@ class Trail(object):
         self._points = list()
         self._lat_lim = None
         self._lng_lim = None
+        self._msl_lim = None
 
     def update(self, gnss_data):
         if "gga" not in gnss_data or gnss_data["gga"] is None:
@@ -52,17 +53,21 @@ class Trail(object):
         if not self._lat_lim:
             self._lat_lim = [gga_info._lat, gga_info._lat]
             self._lng_lim = [gga_info._lng, gga_info._lng]
+            self._msl_lim = [gga_info._msl, gga_info._msl]
         else:
             self._lat_lim = [min(gga_info._lat, self._lat_lim[0]), max(
                 gga_info._lat, self._lat_lim[1])]
             self._lng_lim = [min(gga_info._lng, self._lng_lim[0]), max(
                 gga_info._lng, self._lng_lim[1])]
+            self._msl_lim = [min(gga_info._msl, self._msl_lim[0]), max(
+                gga_info._msl, self._msl_lim[1])]
 
         self._points.append(Point(
             gga_info._lat,
             gga_info._lng,
             u_lat=gga_info._u_lat,
             u_lng=gga_info._u_lng,
+            msl=gga_info._msl,
             hdop=gga_info._hdop
         ))
         if time.time() - self._last_save > 60 * 5:

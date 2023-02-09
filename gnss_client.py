@@ -5,7 +5,7 @@ import threading
 import copy
 import re
 
-from utils import CPrint
+from utils import CPrint, str_to_gps84
 
 
 def fill_zero(origin):
@@ -46,9 +46,9 @@ class GGAInfo(object):
         self._u_lng = cmd_l[5]
         self._msl = None
         if len(cmd_l[2]) != 0:
-            self._lat = float(cmd_l[2]) / 100
+            self._lat = str_to_gps84(*cmd_l[2].split("."))
         if len(cmd_l[4]) != 0:
-            self._lng = float(cmd_l[4]) / 100
+            self._lng = str_to_gps84(*cmd_l[4].split("."))
         if len(cmd_l[9]) != 0:
             self._msl = float(cmd_l[9])
         self._status = int(cmd_l[6])
