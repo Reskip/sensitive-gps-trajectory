@@ -106,7 +106,7 @@ class GNSSClient(object):
         port_list = list(serial.tools.list_ports.comports())
         self._device_port = ""
         for port in port_list:
-            if GNSSClient.GNSS_SERIAL_PORT_NAME not in port.description:
+            if "usb" not in port.description.lower() or "serial" not in port.description.lower():
                 continue
             self._device_port = port.device
         try:
